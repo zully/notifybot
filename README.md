@@ -2,6 +2,11 @@
 
 A simple IRC bot that will notify you via SMS/E-mail when your friends are online.
 
+Terminal can be used to test commands live with the following format:
+COMMAND TARGET :MSG
+Example:
+PRIVMSG <nickname> :test123!
+
 ## Project Structure
 
 ```

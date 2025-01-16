@@ -5,5 +5,6 @@ import (
 )
 
 func main() {
-	bot.Run()
+	notifyBot := bot.NewNotifyBot("chicago.il.us.undernet.org", "6667", "notifybot", []string{"gopherbot"})
+	notifyBot.Run()
 }
