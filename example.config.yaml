@@ -1,0 +1,5 @@
+server: "irc.freenode.org"
+port: "6667"
+botname: "notifybot"
+nicknames:  // list of nicknames to notify of IRC status
+ - "gopherbot"

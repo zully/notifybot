@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -14,19 +15,21 @@ type NotifyBot struct {
 	server           string
 	port             string
 	nickname         string
+	channels         []string
 	nicknamesToCheck []string
 	onlineNicknames  map[string]bool
 	log              *logrus.Logger
 }
 
-func NewNotifyBot(server, port, nickname string, nicknamesToCheck []string) *NotifyBot {
+func NewNotifyBot(server, port, nickname string, channels []string, nicknamesToCheck []string, log *logrus.Logger) *NotifyBot {
 	return &NotifyBot{
 		server:           server,
 		port:             port,
 		nickname:         nickname,
+		channels:         channels,
 		nicknamesToCheck: nicknamesToCheck,
 		onlineNicknames:  make(map[string]bool),
-		log:              logrus.New(),
+		log:              log,
 	}
 }
 
@@ -47,36 +50,44 @@ func (b *NotifyBot) Run() {
 		for scanner.Scan() {
 			msg := scanner.Text()
 			b.log.Info(msg)
-			if strings.Contains(msg, "PING") {
-				response := fmt.Sprintf("PONG %s\r\n", strings.Split(msg, " ")[1])
-				fmt.Fprint(conn, response)
-				b.log.Info(response)
-			}
-			if strings.Contains(msg, "ISON") {
-				b.handleISONResponse(msg)
-			}
-			if strings.Contains(msg, "VERSION") {
-				parts := strings.Split(msg, " ")
-				if len(parts) > 0 && parts[1] == "VERSION" {
-					nickname := strings.TrimPrefix(parts[0], ":")
-					response := fmt.Sprintf("NOTICE %s :%s\r\n", nickname, "NotifyBot version 0.1a")
-					fmt.Fprint(conn, response)
-					b.log.Info(response)
+			parts := strings.Split(msg, " ")
+			if len(parts) > 0 {
+				if parts[0] == "PING" {
+					fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
+					b.log.Infof("PONG %s", parts[1])
 				}
-			}
-			if strings.Contains(msg, "QUIT") || strings.Contains(msg, "PART") {
-				b.handleQuitOrPart(msg)
+				if parts[1] == "303" {
+					b.handleISONResponse(parts)
+				}
+				if parts[1] == "VERSION" {
+					nickname := strings.TrimPrefix(parts[0], ":")
+					fmt.Fprintf(conn, "NOTICE %s :%s\r\n", nickname, "NotifyBot version 0.1a")
+					b.log.Infof("NOTICE %s :%s", nickname, "NotifyBot version 0.1a")
+				}
+				if parts[1] == "QUIT" || parts[1] == "PART" {
+					b.handleQuitOrPart(msg)
+				}
+				if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.nickname)) {
+					b.log.Infof("Connected to server: %s", b.server)
+
+					// join any channels specified in the config
+					for _, channel := range b.channels {
+						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+					}
+
+					// Check who is online every 5 minutes
+					go func() {
+						for {
+							b.checkNicknames(conn)
+							time.Sleep(5 * time.Minute)
+						}
+					}()
+				}
 			}
 		}
 	}()
 
-	// go func() {
-	// 	for {
-	// 		b.checkNicknames(conn)
-	// 		time.Sleep(5 * time.Minute)
-	// 	}
-	// }()
-
+	// Temporary block to allow for manual input
 	input := bufio.NewScanner(os.Stdin)
 	for input.Scan() {
 		fmt.Fprintf(conn, "%s\r\n", input.Text())
@@ -88,22 +99,22 @@ func (b *NotifyBot) checkNicknames(conn net.Conn) {
 	fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
 }
 
-func (b *NotifyBot) handleISONResponse(msg string) {
-	parts := strings.Split(msg, ":")
-	if len(parts) > 1 {
-		currentOnlineNicknames := strings.Fields(parts[1])
+func (b *NotifyBot) handleISONResponse(parts []string) {
+	if len(parts) > 3 {
+		// WORKING ON THE NOTIFICATION LOGIC
+		currentOnlineNicknames := strings.Fields(parts[3])
 		for _, nickname := range b.nicknamesToCheck {
 			if contains(currentOnlineNicknames, nickname) {
 				if !b.onlineNicknames[nickname] {
 					b.log.Infof("The following friend is now online: %s\n", nickname)
 					b.onlineNicknames[nickname] = true
-					// notify.Notify(fmt.Sprintf("%s is now online", nickname))
+					// b.notify(fmt.Sprintf("%s is now online", nickname))
 				}
 			} else {
 				if b.onlineNicknames[nickname] {
 					b.log.Infof("The following friend has gone offline: %s\n", nickname)
 					b.onlineNicknames[nickname] = false
-					// notify.Notify(fmt.Sprintf("%s has gone offline", nickname))
+					// b.notify(fmt.Sprintf("%s has gone offline", nickname))
 				}
 			}
 		}
@@ -117,7 +128,7 @@ func (b *NotifyBot) handleQuitOrPart(msg string) {
 		if b.onlineNicknames[nickname] {
 			b.log.Infof("The following friend has left IRC: %s\n", nickname)
 			b.onlineNicknames[nickname] = false
-			// notify.Notify(fmt.Sprintf("%s has left IRC", nickname))
+			// b.notify(fmt.Sprintf("%s has left IRC", nickname))
 		}
 	}
 }
