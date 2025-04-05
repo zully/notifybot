@@ -13,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const notifyBotVersion = "v0.1f"
+const notifyBotVersion = "v0.1h"
 
 type Config struct {
 	Server      string
@@ -31,6 +31,7 @@ type NotifyBot struct {
 	conf            *Config // Config holds the configuration for the bot
 	onlineNicknames map[string]bool
 	log             *logrus.Logger
+	sleepDuration   time.Duration
 }
 
 func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
@@ -38,6 +39,18 @@ func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
 		conf:            config,
 		onlineNicknames: make(map[string]bool),
 		log:             log,
+		sleepDuration: func() time.Duration {
+			if config.SleepMin != "" {
+				duration, err := time.ParseDuration(config.SleepMin)
+				if err != nil {
+					log.Errorf("Error parsing duration %s, using default of 5 minutes: %s", config.SleepMin, err)
+					return 5 * time.Minute // Default to 5 minutes if parsing fails
+				}
+				return duration
+			}
+			log.Errorf("'SleepMin' not provided in config, defaulting to 5 minutes")
+			return 5 * time.Minute // Default to 5 minutes if not provided
+		}(),
 	}
 }
 
@@ -62,6 +75,8 @@ func (b *NotifyBot) Run() {
 		slices := strings.Split(msg, " ")
 
 		if len(slices) > 0 {
+			// TODO: functionality for handling other server messages
+			// ERROR :Your host is trying to (re)connect too fast -- throttled
 			if slices[0] == "PING" {
 				fmt.Fprintf(conn, "PONG %s\r\n", slices[1])
 				b.log.Infof("PONG %s", slices[1])
@@ -70,7 +85,7 @@ func (b *NotifyBot) Run() {
 			} else if slices[1] == "VERSION" {
 				nickname := strings.TrimPrefix(slices[0], ":")
 				fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
-				b.log.Infof("NOTICE %s :%s", nickname, "NotifyBot version 0.1a")
+				b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
 			} else if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)) {
 				b.log.Infof("Connected to server: %s", b.conf.Server)
 
@@ -86,12 +101,7 @@ func (b *NotifyBot) Run() {
 					for {
 						nicknames := strings.Join(b.conf.Nicknames, " ")
 						fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
-						sleepDuration, err := time.ParseDuration(b.conf.SleepMin)
-						if err != nil {
-							b.log.Errorf("Invalid SleepMin value: %s", b.conf.SleepMin)
-							return
-						}
-						time.Sleep(sleepDuration)
+						time.Sleep(b.sleepDuration)
 					}
 				}()
 			}
@@ -108,13 +118,13 @@ func (b *NotifyBot) handleISONResponse(slices []string) {
 			if _, exists := b.onlineNicknames[nickname]; !exists || !b.onlineNicknames[nickname] {
 				b.log.Infof("The following friend is now online: %s\n", nickname)
 				b.onlineNicknames[nickname] = true
-				b.notify(fmt.Sprintf("%s is now online", nickname)) // Uncomment to enable notifications
+				b.notify(fmt.Sprintf("%s is online", nickname)) // Uncomment to enable notifications
 			}
 		} else {
 			if _, exists := b.onlineNicknames[nickname]; exists && b.onlineNicknames[nickname] {
 				b.log.Infof("The following friend is now offline: %s\n", nickname)
 				b.onlineNicknames[nickname] = false
-				b.notify(fmt.Sprintf("%s is now offline", nickname)) // Uncomment to enable notifications
+				b.notify(fmt.Sprintf("%s is offline", nickname)) // Uncomment to enable notifications
 			}
 		}
 	}
@@ -142,7 +152,13 @@ func (b *NotifyBot) notify(msg string) {
 
 	// Create SES service client
 	svc := ses.New(sess)
-	subject := "IRC Notification"
+	subject := "IRC Notification Event"
+
+	// Get the current timestamp
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+
+	// Append the timestamp to the message
+	msg = fmt.Sprintf("[%s] %s", timestamp, msg)
 
 	// Construct email input
 	input := &ses.SendEmailInput{
