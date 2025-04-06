@@ -64,6 +64,12 @@ func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
 	}
 }
 
+func (b *NotifyBot) setNickname(conn net.Conn) {
+	// Send the NICK and USER commands to identify the bot
+	fmt.Fprintf(conn, "NICK %s\r\n", b.conf.BotName)
+	fmt.Fprintf(conn, "USER %s 8 * :%s\r\n", b.conf.BotName, b.conf.BotName)
+}
+
 func (b *NotifyBot) Run() {
 	b.log.Infof("Attempting to connect to server: %s", b.conf.Server)
 	conn, err := net.Dial("tcp", net.JoinHostPort(b.conf.Server, b.conf.Port))
@@ -73,9 +79,7 @@ func (b *NotifyBot) Run() {
 	}
 	defer conn.Close()
 
-	// Send the NICK and USER commands to identify the bot
-	fmt.Fprintf(conn, "NICK %s\r\n", b.conf.BotName)
-	fmt.Fprintf(conn, "USER %s 8 * :%s\r\n", b.conf.BotName, b.conf.BotName)
+	b.setNickname(conn)
 
 	// read incoming messages from the server and act on them
 	scanner := bufio.NewScanner(conn)
@@ -93,6 +97,10 @@ func (b *NotifyBot) Run() {
 				b.log.Infof("PONG %s", slices[1])
 			} else if slices[1] == "303" && len(slices) > 3 {
 				b.handleISONResponse(slices)
+			} else if slices[1] == "433" { // nickname already in use
+				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
+				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
+				b.setNickname(conn)
 			} else if slices[1] == "VERSION" { // not correctly responding to version requests
 				nickname := strings.TrimPrefix(slices[0], ":")
 				fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
@@ -101,7 +109,7 @@ func (b *NotifyBot) Run() {
 				b.log.Infof("Connected to server: %s", b.conf.Server)
 
 				// join any channels specified in the config
-				if len(b.conf.Channels) == 0 {
+				if len(b.conf.Channels) != 0 {
 					for _, channel := range b.conf.Channels {
 						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
 					}
