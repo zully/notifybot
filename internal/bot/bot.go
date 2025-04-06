@@ -33,9 +33,17 @@ type NotifyBot struct {
 	onlineNicknames map[string]bool
 	log             *logrus.Logger
 	sleepDuration   time.Duration
+	sesClient       *ses.SES
 }
 
 func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(config.AwsRegion),
+	})
+	if err != nil {
+		log.Fatalf("Failed to create AWS session: %s", err)
+	}
+
 	return &NotifyBot{
 		conf:            config,
 		onlineNicknames: make(map[string]bool),
@@ -52,6 +60,7 @@ func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
 			log.Errorf("'SleepMin' not provided in config, defaulting to 5 minutes")
 			return 5 * time.Minute // Default to 5 minutes if not provided
 		}(),
+		sesClient: ses.New(sess), // SES client for sending emails
 	}
 }
 
@@ -133,22 +142,17 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 }
 
 func (b *NotifyBot) notify(msg string) {
-
-	// Configure AWS session
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(b.conf.AwsRegion),
-	})
-	if err != nil {
-		fmt.Println("Error creating session:", err)
-		return
-	}
-
-	// Create SES service client
-	svc := ses.New(sess)
 	subject := "IRC Notification Event"
 
-	// Get the current timestamp
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	// Load the Central Time location
+	location, err := time.LoadLocation("America/Chicago")
+	if err != nil {
+		b.log.Errorf("Error loading location for Central Time: %s", err)
+		location = time.UTC // Fallback to UTC if loading fails
+	}
+
+	// Get the current timestamp in Central Time
+	timestamp := time.Now().In(location).Format("2006-01-02 15:04:05")
 
 	// Append the timestamp to the message
 	msg = fmt.Sprintf("[%s] %s", timestamp, msg)
@@ -164,7 +168,7 @@ func (b *NotifyBot) notify(msg string) {
 			Body: &ses.Body{
 				Text: &ses.Content{
 					Charset: aws.String("UTF-8"),
-					Data:    aws.String(msg), // TODO: add Timestamp to the message
+					Data:    aws.String(msg),
 				},
 			},
 			Subject: &ses.Content{
@@ -176,7 +180,7 @@ func (b *NotifyBot) notify(msg string) {
 	}
 
 	// Send the email
-	_, err = svc.SendEmail(input)
+	_, err = b.sesClient.SendEmail(input)
 	if err != nil {
 		b.log.Errorf("Error sending email: %s", err)
 		return
