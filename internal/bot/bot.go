@@ -78,12 +78,13 @@ func (b *NotifyBot) Run() {
 		if len(slices) > 0 {
 			// TODO: functionality for handling other server messages
 			// ERROR :Your host is trying to (re)connect too fast -- throttled
+			// INFO[0000] :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
 			if slices[0] == "PING" {
 				fmt.Fprintf(conn, "PONG %s\r\n", slices[1])
 				b.log.Infof("PONG %s", slices[1])
 			} else if slices[1] == "303" && len(slices) > 3 {
 				b.handleISONResponse(slices)
-			} else if slices[1] == "VERSION" {
+			} else if slices[1] == "VERSION" { // not correctly responding to version requests
 				nickname := strings.TrimPrefix(slices[0], ":")
 				fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
 				b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
