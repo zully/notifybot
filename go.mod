@@ -5,6 +5,7 @@ go 1.24.2
 require (
 	github.com/aws/aws-sdk-go v1.55.6
 	github.com/sirupsen/logrus v1.9.3
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 )
 
 require (

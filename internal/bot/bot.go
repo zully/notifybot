@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 )
 
 const notifyBotVersion = "v0.1h"
@@ -109,12 +110,12 @@ func (b *NotifyBot) Run() {
 	}
 }
 
-func (b *NotifyBot) handleISONResponse(slices []string) {
-	slices[3] = strings.TrimPrefix(slices[3], ":") // Remove the leading colon from the response
-	currentOnlineNicknames := slices[3:]           // The actual nicknames that are online, after the "ISON" command
+func (b *NotifyBot) handleISONResponse(parts []string) {
+	parts[3] = strings.TrimPrefix(parts[3], ":") // Remove the leading colon from the response
+	currentOnlineNicknames := parts[3:]          // The actual nicknames that are online, after the "ISON" command
 
 	for _, nickname := range b.conf.Nicknames {
-		if contains(currentOnlineNicknames, nickname) {
+		if slices.Contains(currentOnlineNicknames, nickname) {
 			if _, exists := b.onlineNicknames[nickname]; !exists || !b.onlineNicknames[nickname] {
 				b.log.Infof("The following friend is now online: %s\n", nickname)
 				b.onlineNicknames[nickname] = true
@@ -128,15 +129,6 @@ func (b *NotifyBot) handleISONResponse(slices []string) {
 			}
 		}
 	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 func (b *NotifyBot) notify(msg string) {
