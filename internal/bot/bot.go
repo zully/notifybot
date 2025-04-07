@@ -29,7 +29,7 @@ type Config struct {
 }
 
 type NotifyBot struct {
-	conf            *Config // Config holds the configuration for the bot
+	conf            *Config
 	onlineNicknames map[string]bool
 	log             *logrus.Logger
 	sleepDuration   time.Duration
@@ -70,15 +70,19 @@ func (b *NotifyBot) setNickname(conn net.Conn) {
 	fmt.Fprintf(conn, "USER %s 8 * :%s\r\n", b.conf.BotName, b.conf.BotName)
 }
 
-func (b *NotifyBot) Run() {
+func (b *NotifyBot) Connect() (net.Conn, error) {
 	b.log.Infof("Attempting to connect to server: %s", b.conf.Server)
 	conn, err := net.Dial("tcp", net.JoinHostPort(b.conf.Server, b.conf.Port))
 	if err != nil {
 		b.log.Errorf("Error connecting to server: %s", err)
-		return
+		return nil, err
 	}
 	defer conn.Close()
+	return conn, nil
+}
 
+func (b *NotifyBot) Run() {
+	conn, _ := b.Connect()
 	b.setNickname(conn)
 
 	// read incoming messages from the server and act on them
@@ -90,21 +94,37 @@ func (b *NotifyBot) Run() {
 
 		if len(slices) > 0 {
 			// TODO: functionality for handling other server messages
-			// ERROR :Your host is trying to (re)connect too fast -- throttled
-			// INFO[0000] :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
-			if slices[0] == "PING" {
-				fmt.Fprintf(conn, "PONG %s\r\n", slices[1])
-				b.log.Infof("PONG %s", slices[1])
-			} else if slices[1] == "303" && len(slices) > 3 {
-				b.handleISONResponse(slices)
-			} else if slices[1] == "433" { // nickname already in use
+			//  ERROR :Your host is trying to (re)connect too fast -- throttled
+			//  ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
+			// TODO: Sleep 5 minutes and attempt to reconnect if disconnected
+			switch slices[1] {
+			// :Chicago.IL.US.Undernet.Org 303 notifybot :
+			case "303": // ISON response
+				if len(slices) > 3 {
+					b.handleISONResponse(slices)
+				}
+			// :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
+			case "433": // Nickname already in use
 				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
 				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
 				b.setNickname(conn)
-			} else if slices[1] == "VERSION" { // not correctly responding to version requests
-				nickname := strings.TrimPrefix(slices[0], ":")
-				fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
-				b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
+			// FIX VERSION response
+			// :Nickname!~ident@10.10.10.10 PRIVMSG notifybot :\x01VERSION \x01"
+			case "PRIVMSG": // Respond to certain private messages
+				b.log.Info(slices[3])
+				if slices[2] == b.conf.BotName && slices[3] == ":\x01VERSION \x01" {
+					nickname := strings.TrimPrefix(slices[0], ":")
+					nickname = strings.Split(nickname, "!")[0] // Remove the host part
+					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
+					b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
+				}
+			}
+
+			// PING :Chicago.IL.US.Undernet.Org"
+			if slices[0] == "PING" {
+				fmt.Fprintf(conn, "PONG %s\r\n", slices[1])
+				b.log.Infof("PONG %s", slices[1])
+				// :Chicago.IL.US.Undernet.Org NOTICE notifybot :on 1 ca 1(4) ft 10(10) tr
 			} else if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)) {
 				b.log.Infof("Connected to server: %s", b.conf.Server)
 
