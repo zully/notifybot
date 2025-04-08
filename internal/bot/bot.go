@@ -93,25 +93,21 @@ func (b *NotifyBot) Run() {
 		parts := strings.Split(msg, " ")
 
 		if len(parts) > 0 {
-			// TODO: functionality for handling other server messages
-			//  ERROR :Your host is trying to (re)connect too fast -- throttled
-			//  ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
-			// TODO: Sleep 5 minutes and attempt to reconnect if disconnected
 
+			// TODO: functionality for handling other server messages
+			// ERROR :Your host is trying to (re)connect too fast -- throttled
+			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
+			// Sleep 5 minutes and attempt to reconnect if disconnected
 			switch parts[1] {
-			// :Chicago.IL.US.Undernet.Org 303 notifybot :
 			case "303": // ISON response
 				if len(parts) > 3 {
 					b.handleISONResponse(parts)
 				}
-			// :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
-			case "433": // Nickname already in use
+			case "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
 				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
 				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
 				b.setNickname(conn)
-			// FIX VERSION response
-			// :Nickname!~ident@10.10.10.10 PRIVMSG notifybot :\x01VERSION \x01"
-			case "PRIVMSG": // Respond to certain private messages
+			case "PRIVMSG":
 				b.log.Infof("parts[2]: %s parts[3]: %s", parts[2], parts[3])
 				if strings.Contains((parts[3]), "VERSION") {
 					nickname := strings.TrimPrefix(parts[0], ":")
@@ -121,11 +117,9 @@ func (b *NotifyBot) Run() {
 				}
 			}
 
-			// PING :Chicago.IL.US.Undernet.Org"
 			if parts[0] == "PING" {
 				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
 				b.log.Infof("PONG %s", parts[1])
-				// :Chicago.IL.US.Undernet.Org NOTICE notifybot :on 1 ca 1(4) ft 10(10) tr
 			} else if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)) {
 				b.log.Infof("Connected to server: %s", b.conf.Server)
 
