@@ -77,12 +77,12 @@ func (b *NotifyBot) Connect() (net.Conn, error) {
 		b.log.Errorf("Error connecting to server: %s", err)
 		return nil, err
 	}
-	defer conn.Close()
 	return conn, nil
 }
 
 func (b *NotifyBot) Run() {
 	conn, _ := b.Connect()
+	defer conn.Close()
 	b.setNickname(conn)
 
 	// read incoming messages from the server and act on them
@@ -90,18 +90,19 @@ func (b *NotifyBot) Run() {
 	for scanner.Scan() {
 		msg := scanner.Text()
 		b.log.Info(msg)
-		slices := strings.Split(msg, " ")
+		parts := strings.Split(msg, " ")
 
-		if len(slices) > 0 {
+		if len(parts) > 0 {
 			// TODO: functionality for handling other server messages
 			//  ERROR :Your host is trying to (re)connect too fast -- throttled
 			//  ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
 			// TODO: Sleep 5 minutes and attempt to reconnect if disconnected
-			switch slices[1] {
+
+			switch parts[1] {
 			// :Chicago.IL.US.Undernet.Org 303 notifybot :
 			case "303": // ISON response
-				if len(slices) > 3 {
-					b.handleISONResponse(slices)
+				if len(parts) > 3 {
+					b.handleISONResponse(parts)
 				}
 			// :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
 			case "433": // Nickname already in use
@@ -111,9 +112,9 @@ func (b *NotifyBot) Run() {
 			// FIX VERSION response
 			// :Nickname!~ident@10.10.10.10 PRIVMSG notifybot :\x01VERSION \x01"
 			case "PRIVMSG": // Respond to certain private messages
-				b.log.Info(slices[3])
-				if slices[2] == b.conf.BotName && slices[3] == ":\x01VERSION \x01" {
-					nickname := strings.TrimPrefix(slices[0], ":")
+				b.log.Infof("parts[2]: %s parts[3]: %s", parts[2], parts[3])
+				if strings.Contains((parts[3]), "VERSION") {
+					nickname := strings.TrimPrefix(parts[0], ":")
 					nickname = strings.Split(nickname, "!")[0] // Remove the host part
 					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
 					b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
@@ -121,9 +122,9 @@ func (b *NotifyBot) Run() {
 			}
 
 			// PING :Chicago.IL.US.Undernet.Org"
-			if slices[0] == "PING" {
-				fmt.Fprintf(conn, "PONG %s\r\n", slices[1])
-				b.log.Infof("PONG %s", slices[1])
+			if parts[0] == "PING" {
+				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
+				b.log.Infof("PONG %s", parts[1])
 				// :Chicago.IL.US.Undernet.Org NOTICE notifybot :on 1 ca 1(4) ft 10(10) tr
 			} else if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)) {
 				b.log.Infof("Connected to server: %s", b.conf.Server)
