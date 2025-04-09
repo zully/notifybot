@@ -93,21 +93,23 @@ func (b *NotifyBot) Run() {
 		parts := strings.Split(msg, " ")
 
 		if len(parts) > 0 {
-
 			// TODO: functionality for handling other server messages
 			// ERROR :Your host is trying to (re)connect too fast -- throttled
 			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
 			// Sleep 5 minutes and attempt to reconnect if disconnected
-			switch parts[1] {
-			case "303": // ISON response
+			switch {
+			case parts[0] == "PING":
+				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
+				b.log.Infof("PONG %s", parts[1])
+			case parts[1] == "303": // ISON response
 				if len(parts) > 3 {
 					b.handleISONResponse(parts)
 				}
-			case "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
+			case parts[1] == "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
 				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
 				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
 				b.setNickname(conn)
-			case "PRIVMSG":
+			case parts[1] == "PRIVMSG":
 				b.log.Infof("parts[2]: %s parts[3]: %s", parts[2], parts[3])
 				if strings.Contains((parts[3]), "VERSION") {
 					nickname := strings.TrimPrefix(parts[0], ":")
@@ -115,16 +117,11 @@ func (b *NotifyBot) Run() {
 					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
 					b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
 				}
-			}
-
-			if parts[0] == "PING" {
-				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
-				b.log.Infof("PONG %s", parts[1])
-			} else if strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)) {
+			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
 				b.log.Infof("Connected to server: %s", b.conf.Server)
 
 				// join any channels specified in the config
-				if len(b.conf.Channels) != 0 {
+				if b.conf.Channels[0] != "" {
 					for _, channel := range b.conf.Channels {
 						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
 					}
