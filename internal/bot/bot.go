@@ -14,7 +14,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const notifyBotVersion = "v0.1h"
+const notifyBotVersion = "v0.2a"
 
 type Config struct {
 	Server      string
@@ -69,7 +69,7 @@ func (b *NotifyBot) setNickname(conn net.Conn) {
 	fmt.Fprintf(conn, "USER %s 8 * :%s\r\n", b.conf.BotName, b.conf.BotName)
 }
 
-func (b *NotifyBot) Connect() (net.Conn, error) {
+func (b *NotifyBot) connect() (net.Conn, error) {
 	b.log.Infof("Attempting to connect to server: %s", b.conf.Server)
 	conn, err := net.Dial("tcp", net.JoinHostPort(b.conf.Server, b.conf.Port))
 	if err != nil {
@@ -77,71 +77,6 @@ func (b *NotifyBot) Connect() (net.Conn, error) {
 		return nil, err
 	}
 	return conn, nil
-}
-
-func (b *NotifyBot) Run() {
-	conn, _ := b.Connect()
-	defer conn.Close()
-	b.setNickname(conn)
-
-	// read incoming messages from the server and act on them
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		msg := scanner.Text()
-		b.log.Info(msg)
-		parts := strings.Split(msg, " ")
-
-		if len(parts) > 0 {
-			// TODO: functionality for handling other server messages
-			// ERROR :Your host is trying to (re)connect too fast -- throttled
-			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
-			// Sleep 5 minutes and attempt to reconnect if disconnected
-			switch {
-			case parts[0] == "PING":
-				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
-				b.log.Infof("PONG %s", parts[1])
-			case parts[1] == "303": // ISON response
-				if len(parts) > 3 {
-					b.handleISONResponse(parts)
-				}
-			case parts[1] == "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
-				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
-				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
-				b.setNickname(conn)
-			case parts[1] == "PRIVMSG":
-				b.log.Infof("parts[2]: %s parts[3]: %s", parts[2], parts[3])
-				if strings.Contains((parts[3]), "VERSION") {
-					nickname := strings.TrimPrefix(parts[0], ":")
-					nickname = strings.Split(nickname, "!")[0] // Remove the host part
-					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
-					b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
-				}
-			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
-				b.log.Infof("Connected to server: %s", b.conf.Server)
-
-				// join any channels specified in the config
-				if b.conf.Channels[0] != "" {
-					for _, channel := range b.conf.Channels {
-						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
-					}
-				}
-
-				// Check who is online every X configured minutes
-				var keys []string
-				for k := range b.onlineNicknames {
-					keys = append(keys, k)
-				}
-				nicknames := strings.Join(keys, " ")
-
-				go func() {
-					for {
-						fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
-						time.Sleep(b.sleepDuration)
-					}
-				}()
-			}
-		}
-	}
 }
 
 func (b *NotifyBot) handleISONResponse(parts []string) {
@@ -211,4 +146,69 @@ func (b *NotifyBot) notify(msg string) {
 	}
 
 	b.log.Infof("Email sent successfully to %s", b.conf.NotifyEmail)
+}
+
+func (b *NotifyBot) Run() {
+	conn, _ := b.connect()
+	defer conn.Close()
+	b.setNickname(conn)
+
+	// read incoming messages from the server and act on them
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		msg := scanner.Text()
+		b.log.Info(msg)
+		parts := strings.Split(msg, " ")
+
+		if len(parts) > 0 {
+			// TODO: functionality for handling other server messages
+			// ERROR :Your host is trying to (re)connect too fast -- throttled
+			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
+			// Sleep 5 minutes and attempt to reconnect if disconnected
+			switch {
+			case parts[0] == "PING":
+				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
+				b.log.Infof("PONG %s", parts[1])
+			case parts[1] == "303": // ISON response
+				if len(parts) > 3 {
+					b.handleISONResponse(parts)
+				}
+			case parts[1] == "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
+				b.log.Errorf("Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
+				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
+				b.setNickname(conn)
+			case parts[1] == "PRIVMSG":
+				b.log.Infof("parts[2]: %s parts[3]: %s", parts[2], parts[3])
+				if strings.Contains((parts[3]), "VERSION") {
+					nickname := strings.TrimPrefix(parts[0], ":")
+					nickname = strings.Split(nickname, "!")[0] // Remove the host part
+					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
+					b.log.Infof("NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
+				}
+			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
+				b.log.Infof("Connected to server: %s", b.conf.Server)
+
+				// join any channels specified in the config
+				if b.conf.Channels[0] != "" {
+					for _, channel := range b.conf.Channels {
+						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+					}
+				}
+
+				// Check who is online every X configured minutes
+				var keys []string
+				for k := range b.onlineNicknames {
+					keys = append(keys, k)
+				}
+				nicknames := strings.Join(keys, " ")
+
+				go func() {
+					for {
+						fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
+						time.Sleep(b.sleepDuration)
+					}
+				}()
+			}
+		}
+	}
 }
