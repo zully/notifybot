@@ -21,7 +21,6 @@ type Config struct {
 	Port        string
 	BotName     string
 	Channels    []string
-	Nicknames   []string
 	NotifyEmail string
 	FromEmail   string
 	SleepMin    string
@@ -36,7 +35,7 @@ type NotifyBot struct {
 	sesClient       *ses.SES
 }
 
-func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
+func NewNotifyBot(config *Config, log *logrus.Logger, onlineNicknames map[string]bool) *NotifyBot {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(config.AwsRegion),
 	})
@@ -46,7 +45,7 @@ func NewNotifyBot(config *Config, log *logrus.Logger) *NotifyBot {
 
 	return &NotifyBot{
 		conf:            config,
-		onlineNicknames: make(map[string]bool),
+		onlineNicknames: onlineNicknames,
 		log:             log,
 		sleepDuration: func() time.Duration {
 			if config.SleepMin != "" {
@@ -128,9 +127,14 @@ func (b *NotifyBot) Run() {
 				}
 
 				// Check who is online every X configured minutes
+				var keys []string
+				for k := range b.onlineNicknames {
+					keys = append(keys, k)
+				}
+				nicknames := strings.Join(keys, " ")
+
 				go func() {
 					for {
-						nicknames := strings.Join(b.conf.Nicknames, " ")
 						fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
 						time.Sleep(b.sleepDuration)
 					}
@@ -144,15 +148,15 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 	parts[3] = strings.TrimPrefix(parts[3], ":") // Remove the leading colon from the response
 	currentOnlineNicknames := parts[3:]          // The actual nicknames that are online, after the "ISON" command
 
-	for _, nickname := range b.conf.Nicknames {
+	for nickname := range b.onlineNicknames {
 		if slices.Contains(currentOnlineNicknames, nickname) {
-			if _, exists := b.onlineNicknames[nickname]; !exists || !b.onlineNicknames[nickname] {
+			if !b.onlineNicknames[nickname] {
 				b.log.Infof("The following friend is now online: %s\n", nickname)
 				b.onlineNicknames[nickname] = true
 				b.notify(fmt.Sprintf("%s is online", nickname)) // Uncomment to enable notifications
 			}
 		} else {
-			if _, exists := b.onlineNicknames[nickname]; exists && b.onlineNicknames[nickname] {
+			if b.onlineNicknames[nickname] {
 				b.log.Infof("The following friend is now offline: %s\n", nickname)
 				b.onlineNicknames[nickname] = false
 				b.notify(fmt.Sprintf("%s is offline", nickname)) // Uncomment to enable notifications
