@@ -21,15 +21,19 @@ func loadConfigFromEnv() *bot.Config {
 	}
 }
 
+func loadNicknamesFromEnv() map[string]bool {
+	nicknames := make(map[string]bool)
+	for _, nickname := range strings.Split(os.Getenv("NICKNAMES"), ",") {
+		nicknames[nickname] = false
+	}
+	return nicknames
+}
+
 func main() {
 	log := logrus.New()
 	config := loadConfigFromEnv()
+	nicknames := loadNicknamesFromEnv()
 
-	var onlineNicknames = make(map[string]bool)
-	for _, nickname := range strings.Split(os.Getenv("NICKNAMES"), ",") {
-		onlineNicknames[nickname] = false
-	}
-
-	notifyBot := bot.NewNotifyBot(config, log, onlineNicknames)
+	notifyBot := bot.NewNotifyBot(config, log, nicknames)
 	notifyBot.Run()
 }
