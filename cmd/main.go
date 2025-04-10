@@ -1,11 +1,10 @@
 package main
 
 import (
+	"log"
 	"notifybot/internal/bot"
 	"os"
 	"strings"
-
-	"github.com/sirupsen/logrus"
 )
 
 func loadConfigFromEnv() *bot.Config {
@@ -30,7 +29,7 @@ func loadNicknamesFromEnv() map[string]bool {
 }
 
 func main() {
-	log := logrus.New()
+	log := log.New(os.Stdout, "notifybot: ", log.LstdFlags)
 	config := loadConfigFromEnv()
 	nicknames := loadNicknamesFromEnv()
 
