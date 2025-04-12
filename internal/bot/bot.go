@@ -3,7 +3,7 @@ package bot
 import (
 	"bufio"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -30,17 +30,17 @@ type Config struct {
 type NotifyBot struct {
 	conf          *Config
 	nicknames     map[string]bool
-	log           *log.Logger
+	log           *slog.Logger
 	sleepDuration time.Duration
 	sesClient     *ses.SES
 }
 
-func NewNotifyBot(config *Config, log *log.Logger, nicknames map[string]bool) *NotifyBot {
+func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *NotifyBot {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(config.AwsRegion),
 	})
 	if err != nil {
-		log.Fatalf("Failed to create AWS session: %s", err)
+		log.Error("Failed to create AWS session", "error", err)
 	}
 
 	return &NotifyBot{
@@ -51,12 +51,12 @@ func NewNotifyBot(config *Config, log *log.Logger, nicknames map[string]bool) *N
 			if config.SleepMin != "" {
 				duration, err := time.ParseDuration(config.SleepMin)
 				if err != nil {
-					log.Printf("ERROR: Error parsing duration %s, using default of 5 minutes: %s", config.SleepMin, err)
+					log.Error("Error parsing duration", "duration", config.SleepMin, "error", err)
 					return 5 * time.Minute // Default to 5 minutes if parsing fails
 				}
 				return duration
 			}
-			log.Printf("ERROR: 'SleepMin' not provided in config, defaulting to 5 minutes")
+			log.Error("'SleepMin' not provided in config, defaulting to 5 minutes")
 			return 5 * time.Minute // Default to 5 minutes if not provided
 		}(),
 		sesClient: ses.New(sess), // SES client for sending emails
@@ -70,10 +70,10 @@ func (b *NotifyBot) setNickname(conn net.Conn) {
 }
 
 func (b *NotifyBot) connect() (net.Conn, error) {
-	b.log.Printf("INFO: Attempting to connect to server: %s", b.conf.Server)
+	b.log.Info("Attempting to connect to server", "server", b.conf.Server)
 	conn, err := net.Dial("tcp", net.JoinHostPort(b.conf.Server, b.conf.Port))
 	if err != nil {
-		b.log.Printf("ERROR: Error connecting to server: %s", err)
+		b.log.Error("Error connecting to server", "error", err)
 		return nil, err
 	}
 	return conn, nil
@@ -86,13 +86,13 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 	for nickname := range b.nicknames {
 		if slices.Contains(currentnicknames, nickname) {
 			if !b.nicknames[nickname] {
-				b.log.Printf("INFO: The following friend is now online: %s\n", nickname)
+				b.log.Info("The following friend is now online:", "nickname", nickname)
 				b.nicknames[nickname] = true
 				b.notify(fmt.Sprintf("%s is online", nickname)) // Uncomment to enable notifications
 			}
 		} else {
 			if b.nicknames[nickname] {
-				b.log.Printf("INFO: The following friend is now offline: %s\n", nickname)
+				b.log.Info("The following friend is now offline:", "nickname", nickname)
 				b.nicknames[nickname] = false
 				b.notify(fmt.Sprintf("%s is offline", nickname)) // Uncomment to enable notifications
 			}
@@ -106,7 +106,7 @@ func (b *NotifyBot) notify(msg string) {
 	// Load the Central Time location
 	location, err := time.LoadLocation("America/Chicago")
 	if err != nil {
-		b.log.Printf("ERROR: Error loading location for Central Time: %s", err)
+		b.log.Error("Error loading location for Central Time", "error", err)
 		location = time.UTC // Fallback to UTC if loading fails
 	}
 
@@ -141,11 +141,11 @@ func (b *NotifyBot) notify(msg string) {
 	// Send the email
 	_, err = b.sesClient.SendEmail(input)
 	if err != nil {
-		b.log.Printf("ERROR: Error sending email: %s", err)
+		b.log.Error("Error sending email", "error", err)
 		return
 	}
 
-	b.log.Printf("INFO: Email sent successfully to %s", b.conf.NotifyEmail)
+	b.log.Info("Email sent successfully", "recipient", b.conf.NotifyEmail)
 }
 
 func (b *NotifyBot) Run() {
@@ -157,7 +157,7 @@ func (b *NotifyBot) Run() {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		msg := scanner.Text()
-		b.log.Printf("SERVER: %s", msg)
+		b.log.Info(msg)
 		parts := strings.Split(msg, " ")
 
 		if len(parts) > 0 {
@@ -168,13 +168,13 @@ func (b *NotifyBot) Run() {
 			switch {
 			case parts[0] == "PING":
 				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
-				b.log.Printf("INFO: PONG %s", parts[1])
+				b.log.Info("PONG", "id", parts[1])
 			case parts[1] == "303": // ISON response
 				if len(parts) > 3 {
 					b.handleISONResponse(parts)
 				}
 			case parts[1] == "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
-				b.log.Printf("ERROR: Nickname %s is already in use. Appending _ to the end of the nick.", b.conf.BotName)
+				b.log.Error("Nickname is already in use. Appending _ to the end of the nick.", "nickname", b.conf.BotName)
 				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
 				b.setNickname(conn)
 			case parts[1] == "PRIVMSG":
@@ -182,10 +182,10 @@ func (b *NotifyBot) Run() {
 					nickname := strings.TrimPrefix(parts[0], ":")
 					nickname = strings.Split(nickname, "!")[0] // Remove the host part
 					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
-					b.log.Printf("INFO: NOTICE %s :NotifyBot %s", nickname, notifyBotVersion)
+					b.log.Info("Version request acknowledged", "nickname", nickname, "version", notifyBotVersion)
 				}
 			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
-				b.log.Printf("INFO: Connected to server: %s", b.conf.Server)
+				b.log.Info("Connected to server", "server", b.conf.Server)
 
 				// join any channels specified in the config
 				if b.conf.Channels[0] != "" {

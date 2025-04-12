@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"notifybot/internal/bot"
 	"os"
 	"strings"
@@ -29,7 +29,10 @@ func loadNicknamesFromEnv() map[string]bool {
 }
 
 func main() {
-	log := log.New(os.Stdout, "notifybot: ", log.LstdFlags)
+	// Create a logger using log/slog
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	log.Info("Starting NotifyBot")
+
 	config := loadConfigFromEnv()
 	nicknames := loadNicknamesFromEnv()
 
