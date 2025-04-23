@@ -149,7 +149,11 @@ func (b *NotifyBot) notify(msg string) {
 }
 
 func (b *NotifyBot) Run() {
-	conn, _ := b.connect()
+	conn, err := b.connect()
+	if err != nil {
+		b.log.Error("Failed to connect to server", "error", err)
+		return
+	}
 	defer conn.Close()
 	b.setNickname(conn)
 
@@ -208,6 +212,11 @@ func (b *NotifyBot) Run() {
 					}
 				}()
 			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			b.log.Error("Error reading from server", "error", err)
+			return
 		}
 	}
 }

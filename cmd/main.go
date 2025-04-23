@@ -8,6 +8,13 @@ import (
 )
 
 func loadConfigFromEnv() *bot.Config {
+	requiredVars := []string{"SERVER", "PORT", "BOT_NAME", "NOTIFY_EMAIL", "FROM_EMAIL", "AWS_REGION"}
+	for _, v := range requiredVars {
+		if os.Getenv(v) == "" {
+			slog.Debug("Environment variable is required but not set", "error", v)
+		}
+	}
+
 	return &bot.Config{
 		Server:      os.Getenv("SERVER"),
 		Port:        os.Getenv("PORT"),
@@ -34,6 +41,7 @@ func main() {
 	log.Info("Starting NotifyBot")
 
 	config := loadConfigFromEnv()
+	log.Info("Configuration loaded successfully")
 	nicknames := loadNicknamesFromEnv()
 
 	notifyBot := bot.NewNotifyBot(config, log, nicknames)
