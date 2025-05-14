@@ -14,7 +14,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const notifyBotVersion = "v0.2a"
+const notifyBotVersion = "v0.3a"
 
 type Config struct {
 	Server      string
@@ -33,6 +33,7 @@ type NotifyBot struct {
 	log           *slog.Logger
 	sleepDuration time.Duration
 	sesClient     *ses.SES
+	connected     bool
 }
 
 func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *NotifyBot {
@@ -60,6 +61,7 @@ func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *
 			return 5 * time.Minute // Default to 5 minutes if not provided
 		}(),
 		sesClient: ses.New(sess), // SES client for sending emails
+		connected: false,
 	}
 }
 
@@ -77,6 +79,19 @@ func (b *NotifyBot) connect() (net.Conn, error) {
 		return nil, err
 	}
 	return conn, nil
+}
+
+func (b *NotifyBot) reconnect() net.Conn {
+	for {
+		b.log.Info("Attempting to reconnect to server", "server", b.conf.Server)
+		conn, err := b.connect()
+		if err == nil {
+			b.log.Info("Reconnected to server successfully", "server", b.conf.Server)
+			return conn
+		}
+		b.log.Error("Reconnection attempt failed", "error", err)
+		time.Sleep(3 * time.Minute) // Wait 3 minutes before retrying
+	}
 }
 
 func (b *NotifyBot) handleISONResponse(parts []string) {
@@ -152,7 +167,7 @@ func (b *NotifyBot) Run() {
 	conn, err := b.connect()
 	if err != nil {
 		b.log.Error("Failed to connect to server", "error", err)
-		return
+		conn = b.reconnect() // Attempt to reconnect if the initial connection fails
 	}
 	defer conn.Close()
 	b.setNickname(conn)
@@ -168,7 +183,7 @@ func (b *NotifyBot) Run() {
 			// TODO: functionality for handling other server messages
 			// ERROR :Your host is trying to (re)connect too fast -- throttled
 			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
-			// Sleep 5 minutes and attempt to reconnect if disconnected
+			// Attempt to reconnect every 3 minutes until the connection is re-established
 			switch {
 			case parts[0] == "PING":
 				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
@@ -188,8 +203,17 @@ func (b *NotifyBot) Run() {
 					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
 					b.log.Info("Version request acknowledged", "nickname", nickname, "version", notifyBotVersion)
 				}
+			case parts[0] == "ERROR":
+				b.log.Error("Server error, attempting to reconnect", "error", msg)
+				conn.Close()
+				conn = b.reconnect() // Reconnect on server error
+				b.setNickname(conn)
+				scanner = bufio.NewScanner(conn) // Reset scanner for the new connection
+				continue
+
 			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
 				b.log.Info("Connected to server", "server", b.conf.Server)
+				b.connected = true
 
 				// join any channels specified in the config
 				if b.conf.Channels[0] != "" {
@@ -215,7 +239,11 @@ func (b *NotifyBot) Run() {
 		}
 
 		if err := scanner.Err(); err != nil {
-			b.log.Error("Error reading from server", "error", err)
+			b.log.Error("Error reading from server, attempting to reconnect", "error", err)
+			conn.Close()
+			conn = b.reconnect() // Reconnect on read error
+			b.setNickname(conn)
+			b.Run() // Restart the Run loop with the new connection
 			return
 		}
 	}
