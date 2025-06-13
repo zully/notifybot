@@ -101,13 +101,13 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 	for nickname := range b.nicknames {
 		if slices.Contains(currentnicknames, nickname) {
 			if !b.nicknames[nickname] {
-				b.log.Info("The following friend is now online:", "nickname", nickname)
+				b.log.Info("The following friend is now online:", "nickname", strings.TrimSuffix(nickname, "\n"))
 				b.nicknames[nickname] = true
 				b.notify(fmt.Sprintf("%s is online", nickname)) // Uncomment to enable notifications
 			}
 		} else {
 			if b.nicknames[nickname] {
-				b.log.Info("The following friend is now offline:", "nickname", nickname)
+				b.log.Info("The following friend is now offline:", "nickname", strings.TrimSuffix(nickname, "\n"))
 				b.nicknames[nickname] = false
 				b.notify(fmt.Sprintf("%s is offline", nickname)) // Uncomment to enable notifications
 			}
@@ -164,87 +164,84 @@ func (b *NotifyBot) notify(msg string) {
 }
 
 func (b *NotifyBot) Run() {
-	conn, err := b.connect()
-	if err != nil {
-		b.log.Error("Failed to connect to server", "error", err)
-		conn = b.reconnect() // Attempt to reconnect if the initial connection fails
-	}
-	defer conn.Close()
-	b.setNickname(conn)
+reconnectLoop:
+	for {
+		conn, err := b.connect()
+		if err != nil {
+			b.log.Error("Failed to connect to server", "error", err)
+			conn = b.reconnect() // Attempt to reconnect if the initial connection fails
+		}
+		b.setNickname(conn)
 
-	// read incoming messages from the server and act on them
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		msg := scanner.Text()
-		b.log.Info(msg)
-		parts := strings.Split(msg, " ")
+		// read incoming messages from the server and act on them
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			msg := scanner.Text()
+			b.log.Info(msg)
+			parts := strings.Split(msg, " ")
 
-		if len(parts) > 0 {
-			// TODO: functionality for handling other server messages
-			// ERROR :Your host is trying to (re)connect too fast -- throttled
-			// ERROR :Closing Link: notifybot by Chicago.IL.US.Undernet.Org (Ping timeout)
-			// Attempt to reconnect every 3 minutes until the connection is re-established
-			switch {
-			case parts[0] == "PING":
-				fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
-				b.log.Info("PONG", "id", parts[1])
-			case parts[1] == "303": // ISON response
-				if len(parts) > 3 {
-					b.handleISONResponse(parts)
-				}
-			case parts[1] == "433": // :Chicago.IL.US.Undernet.Org 433 * notifybot :Nickname is already in use.
-				b.log.Error("Nickname is already in use. Appending _ to the end of the nick.", "nickname", b.conf.BotName)
-				b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
-				b.setNickname(conn)
-			case parts[1] == "PRIVMSG":
-				if strings.Contains((parts[3]), "VERSION") {
-					nickname := strings.TrimPrefix(parts[0], ":")
-					nickname = strings.Split(nickname, "!")[0] // Remove the host part
-					fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
-					b.log.Info("Version request acknowledged", "nickname", nickname, "version", notifyBotVersion)
-				}
-			case parts[0] == "ERROR":
-				b.log.Error("Server error, attempting to reconnect", "error", msg)
-				conn.Close()
-				conn = b.reconnect() // Reconnect on server error
-				b.setNickname(conn)
-				scanner = bufio.NewScanner(conn) // Reset scanner for the new connection
-				continue
-
-			case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
-				b.log.Info("Connected to server", "server", b.conf.Server)
-				b.connected = true
-
-				// join any channels specified in the config
-				if b.conf.Channels[0] != "" {
-					for _, channel := range b.conf.Channels {
-						fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+			if len(parts) > 0 {
+				switch {
+				case parts[0] == "PING":
+					fmt.Fprintf(conn, "PONG %s\r\n", parts[1])
+					b.log.Info("PONG", "id", parts[1])
+				case parts[1] == "303": // ISON response
+					if len(parts) > 3 {
+						b.handleISONResponse(parts)
 					}
-				}
-
-				// Check who is online every X configured minutes
-				var keys []string
-				for k := range b.nicknames {
-					keys = append(keys, k)
-				}
-				nicknames := strings.Join(keys, " ")
-
-				go func() {
-					for {
-						fmt.Fprintf(conn, "ISON %s\r\n", nicknames)
-						time.Sleep(b.sleepDuration)
+				case parts[1] == "433": // Nickname in use
+					b.log.Error("Nickname is already in use. Appending _ to the end of the nick.", "nickname", b.conf.BotName)
+					b.conf.BotName = fmt.Sprintf("%s_", b.conf.BotName)
+					b.setNickname(conn)
+				case parts[1] == "PRIVMSG":
+					if strings.Contains((parts[3]), "VERSION") {
+						nickname := strings.TrimPrefix(parts[0], ":")
+						nickname = strings.Split(nickname, "!")[0]
+						fmt.Fprintf(conn, "NOTICE %s :NotifyBot %s\r\n", nickname, notifyBotVersion)
+						b.log.Info("Version request acknowledged", "nickname", nickname, "version", notifyBotVersion)
 					}
-				}()
+				case parts[0] == "ERROR":
+					b.log.Error("Server error, attempting to reconnect", "error", msg)
+					conn.Close()
+					continue reconnectLoop // Go back to the top and reconnect
+				case strings.Contains(msg, fmt.Sprintf("NOTICE %s :on", b.conf.BotName)):
+					b.log.Info("Connected to server", "server", b.conf.Server)
+					b.connected = true
+
+					// join any channels specified in the config
+					if b.conf.Channels[0] != "" {
+						for _, channel := range b.conf.Channels {
+							fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+						}
+					}
+
+					// Check who is online every X configured minutes
+					var keys []string
+					for k := range b.nicknames {
+						keys = append(keys, k)
+					}
+					nicknames := strings.Join(keys, " ")
+
+					go func(c net.Conn, nicks string, sleep time.Duration) {
+						for {
+							_, err := fmt.Fprintf(c, "ISON %s\r\n", nicks)
+							if err != nil {
+								return // exit goroutine if write fails
+							}
+							time.Sleep(sleep)
+						}
+					}(conn, nicknames, b.sleepDuration)
+				}
 			}
 		}
 
+		// If we reach here, scanner.Scan() returned false (connection lost or error)
 		if err := scanner.Err(); err != nil {
 			b.log.Error("Error reading from server, attempting to reconnect", "error", err)
-			conn.Close()
-			conn = b.reconnect() // Reconnect on read error
-			b.setNickname(conn)
-			b.Run() // Restart the Run loop with the new connection
-			return
+		} else {
+			b.log.Error("Disconnected from server, attempting to reconnect")
 		}
+		conn.Close()
+		// Loop will restart and reconnect
 	}
 }
