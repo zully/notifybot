@@ -3,7 +3,7 @@ WORKDIR /app
 COPY go.mod go.sum /app/
 RUN go mod download
 COPY . /app/
-RUN go build -o /app/bin/notifybot /app/cmd/main.go
+RUN GOOS=linux GOARCH=amd64 go build -o /app/bin/notifybot /app/cmd/main.go
 
 FROM alpine:3.20
 WORKDIR /root/
