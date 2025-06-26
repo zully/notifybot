@@ -122,7 +122,8 @@ func (b *NotifyBot) notify(msg string) {
 	location, err := time.LoadLocation("America/Chicago")
 	if err != nil {
 		b.log.Error("Error loading location for Central Time", "error", err)
-		location = time.UTC // Fallback to UTC if loading fails
+		// Fallback to fixed UTC-6 offset for Central Time
+		location = time.FixedZone("Central", -6*60*60)
 	}
 
 	// Get the current timestamp in Central Time
