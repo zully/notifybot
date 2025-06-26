@@ -14,7 +14,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const notifyBotVersion = "v0.3a"
+const notifyBotVersion = "v0.3b"
 
 type Config struct {
 	Server      string
@@ -37,6 +37,13 @@ type NotifyBot struct {
 }
 
 func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *NotifyBot {
+	log.Info("NotifyBot starting", "version", notifyBotVersion)
+	var nicks []string
+	for k := range nicknames {
+		nicks = append(nicks, k)
+	}
+	log.Info("Notifying on nicknames", "nicknames", nicks)
+
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(config.AwsRegion),
 	})
