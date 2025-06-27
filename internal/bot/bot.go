@@ -14,7 +14,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const notifyBotVersion = "v0.3b"
+const notifyBotVersion = "v0.3c"
 
 type Config struct {
 	Server      string
@@ -27,12 +27,19 @@ type Config struct {
 	AwsRegion   string
 }
 
+// Mock SES client implementing only the SendEmail method needed for testing
+// Use an interface for sesClient to allow mocking
+
+type sesSender interface {
+	SendEmail(input *ses.SendEmailInput) (*ses.SendEmailOutput, error)
+}
+
 type NotifyBot struct {
 	conf          *Config
 	nicknames     map[string]bool
 	log           *slog.Logger
 	sleepDuration time.Duration
-	sesClient     *ses.SES
+	sesClient     sesSender
 	connected     bool
 }
 
@@ -125,16 +132,8 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 func (b *NotifyBot) notify(msg string) {
 	subject := "IRC Notification Event"
 
-	// Load the Central Time location
-	location, err := time.LoadLocation("America/Chicago")
-	if err != nil {
-		b.log.Error("Error loading location for Central Time", "error", err)
-		// Fallback to fixed UTC-6 offset for Central Time
-		location = time.FixedZone("Central", -6*60*60)
-	}
-
-	// Get the current timestamp in Central Time
-	timestamp := time.Now().In(location).Format("2006-01-02 15:04:05")
+	// Use UTC for timestamp
+	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 
 	// Append the timestamp to the message
 	msg = fmt.Sprintf("[%s] %s", timestamp, msg)
@@ -162,7 +161,7 @@ func (b *NotifyBot) notify(msg string) {
 	}
 
 	// Send the email
-	_, err = b.sesClient.SendEmail(input)
+	_, err := b.sesClient.SendEmail(input)
 	if err != nil {
 		b.log.Error("Error sending email", "error", err)
 		return
