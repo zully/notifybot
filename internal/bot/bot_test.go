@@ -55,20 +55,55 @@ func TestNotifyBot_notify(t *testing.T) {
 
 func TestHandleISONResponse_online_offline(t *testing.T) {
 	conf := &Config{}
-	nicknames := map[string]bool{"alice": false, "bob": true}
+	nicknames := map[string]bool{"alice": false, "bob": true, "marlene": false}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	bot := NewNotifyBot(conf, log, nicknames)
 	mock := &mockSES{}
-	bot.sesClient = mock // now valid
+	bot.sesClient = mock
 
-	// alice comes online, bob goes offline
+	// alice comes online
 	parts := []string{"", "303", "notifybot", ":alice"}
 	bot.handleISONResponse(parts)
 	if !bot.nicknames["alice"] {
 		t.Error("alice should be marked online")
 	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for alice online")
+	}
+	mock.sent = false // reset
+
+	// marlene comes online with trailing space
+	parts = []string{"", "303", "notifybot", ":marlene "}
+	bot.handleISONResponse(parts)
+	if !bot.nicknames["marlene"] {
+		t.Error("marlene should be marked online")
+	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for marlene online")
+	}
+	mock.sent = false // reset
+
+	// marlene goes offline (empty ISON response)
+	parts = []string{"", "303", "notifybot", ":"}
+	bot.handleISONResponse(parts)
+	if bot.nicknames["marlene"] {
+		t.Error("marlene should be marked offline")
+	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for marlene offline")
+	}
+	mock.sent = false // reset
+
+	// bob goes offline (was true at start)
+	// Only notify if state changes from true to false
+	// Since bob was set offline above, no notification should be sent again
+	parts = []string{"", "303", "notifybot", ":"}
+	bot.handleISONResponse(parts)
 	if bot.nicknames["bob"] {
 		t.Error("bob should be marked offline")
+	}
+	if mock.sent {
+		t.Error("SES SendEmail should NOT be called for bob offline again (no state change)")
 	}
 }
 
