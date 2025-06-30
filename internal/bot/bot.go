@@ -115,12 +115,13 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 	var currentnicknames []string
 	if isonField != "" {
 		for _, n := range strings.Fields(isonField) {
-			currentnicknames = append(currentnicknames, strings.TrimSpace(n))
+			currentnicknames = append(currentnicknames, strings.ToLower(strings.TrimSpace(n)))
 		}
 	}
 
 	for nickname := range b.nicknames {
-		isOnline := slices.Contains(currentnicknames, nickname)
+		lowerNick := strings.ToLower(nickname)
+		isOnline := slices.Contains(currentnicknames, lowerNick)
 		if isOnline && !b.nicknames[nickname] {
 			b.log.Info("The following friend is now online:", "nickname", strings.TrimSuffix(nickname, "\n"))
 			b.nicknames[nickname] = true

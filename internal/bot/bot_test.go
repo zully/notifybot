@@ -107,6 +107,47 @@ func TestHandleISONResponse_online_offline(t *testing.T) {
 	}
 }
 
+func TestHandleISONResponse_case_insensitive(t *testing.T) {
+	conf := &Config{}
+	nicknames := map[string]bool{"Alice": false, "BoB": false, "MARLENE": false}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	bot := NewNotifyBot(conf, log, nicknames)
+	mock := &mockSES{}
+	bot.sesClient = mock
+
+	// alice comes online as "alice" (lowercase)
+	parts := []string{"", "303", "notifybot", ":alice"}
+	bot.handleISONResponse(parts)
+	if !bot.nicknames["Alice"] {
+		t.Error("Alice should be marked online (case-insensitive match)")
+	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for Alice online (case-insensitive)")
+	}
+	mock.sent = false // reset
+
+	// bob comes online as "BOB" (uppercase)
+	parts = []string{"", "303", "notifybot", ":BOB"}
+	bot.handleISONResponse(parts)
+	if !bot.nicknames["BoB"] {
+		t.Error("BoB should be marked online (case-insensitive match)")
+	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for BoB online (case-insensitive)")
+	}
+	mock.sent = false // reset
+
+	// marlene comes online as "mArLeNe" (mixed case)
+	parts = []string{"", "303", "notifybot", ":mArLeNe"}
+	bot.handleISONResponse(parts)
+	if !bot.nicknames["MARLENE"] {
+		t.Error("MARLENE should be marked online (case-insensitive match)")
+	}
+	if !mock.sent {
+		t.Error("Expected SES SendEmail to be called for MARLENE online (case-insensitive)")
+	}
+}
+
 func TestSetNickname(t *testing.T) {
 	conf := &Config{BotName: "testbot"}
 	nicknames := map[string]bool{}
