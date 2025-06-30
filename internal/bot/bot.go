@@ -109,22 +109,26 @@ func (b *NotifyBot) reconnect() net.Conn {
 }
 
 func (b *NotifyBot) handleISONResponse(parts []string) {
-	parts[3] = strings.TrimPrefix(parts[3], ":") // Remove the leading colon from the response
-	currentnicknames := parts[3:]                // The actual nicknames that are online, after the "ISON" command
+	// Remove the leading colon and split nicknames, trim whitespace
+	isonField := strings.TrimPrefix(parts[3], ":")
+	isonField = strings.TrimSpace(isonField)
+	var currentnicknames []string
+	if isonField != "" {
+		for _, n := range strings.Fields(isonField) {
+			currentnicknames = append(currentnicknames, strings.TrimSpace(n))
+		}
+	}
 
 	for nickname := range b.nicknames {
-		if slices.Contains(currentnicknames, nickname) {
-			if !b.nicknames[nickname] {
-				b.log.Info("The following friend is now online:", "nickname", strings.TrimSuffix(nickname, "\n"))
-				b.nicknames[nickname] = true
-				b.notify(fmt.Sprintf("%s is online", nickname)) // Uncomment to enable notifications
-			}
-		} else {
-			if b.nicknames[nickname] {
-				b.log.Info("The following friend is now offline:", "nickname", strings.TrimSuffix(nickname, "\n"))
-				b.nicknames[nickname] = false
-				b.notify(fmt.Sprintf("%s is offline", nickname)) // Uncomment to enable notifications
-			}
+		isOnline := slices.Contains(currentnicknames, nickname)
+		if isOnline && !b.nicknames[nickname] {
+			b.log.Info("The following friend is now online:", "nickname", strings.TrimSuffix(nickname, "\n"))
+			b.nicknames[nickname] = true
+			b.notify(fmt.Sprintf("%s is online", nickname))
+		} else if !isOnline && b.nicknames[nickname] {
+			b.log.Info("The following friend is now offline:", "nickname", strings.TrimSuffix(nickname, "\n"))
+			b.nicknames[nickname] = false
+			b.notify(fmt.Sprintf("%s is offline", nickname))
 		}
 	}
 }
