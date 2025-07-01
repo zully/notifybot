@@ -43,6 +43,19 @@ type NotifyBot struct {
 	connected     bool
 }
 
+func parseSleepDuration(config *Config, log *slog.Logger) time.Duration {
+	if config.SleepMin != "" {
+		duration, err := time.ParseDuration(config.SleepMin)
+		if err != nil {
+			log.Error("Error parsing duration", "duration", config.SleepMin, "error", err)
+			return 5 * time.Minute
+		}
+		return duration
+	}
+	log.Error("'SleepMin' not provided in config, defaulting to 5 minutes")
+	return 5 * time.Minute
+}
+
 func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *NotifyBot {
 	log.Info("NotifyBot starting", "version", notifyBotVersion)
 	var nicks []string
@@ -59,23 +72,12 @@ func NewNotifyBot(config *Config, log *slog.Logger, nicknames map[string]bool) *
 	}
 
 	return &NotifyBot{
-		conf:      config,
-		nicknames: nicknames,
-		log:       log,
-		sleepDuration: func() time.Duration {
-			if config.SleepMin != "" {
-				duration, err := time.ParseDuration(config.SleepMin)
-				if err != nil {
-					log.Error("Error parsing duration", "duration", config.SleepMin, "error", err)
-					return 5 * time.Minute // Default to 5 minutes if parsing fails
-				}
-				return duration
-			}
-			log.Error("'SleepMin' not provided in config, defaulting to 5 minutes")
-			return 5 * time.Minute // Default to 5 minutes if not provided
-		}(),
-		sesClient: ses.New(sess), // SES client for sending emails
-		connected: false,
+		conf:          config,
+		nicknames:     nicknames,
+		log:           log,
+		sleepDuration: parseSleepDuration(config, log),
+		sesClient:     ses.New(sess), // SES client for sending emails
+		connected:     false,
 	}
 }
 
@@ -109,13 +111,11 @@ func (b *NotifyBot) reconnect() net.Conn {
 }
 
 func (b *NotifyBot) handleISONResponse(parts []string) {
-	// Remove the leading colon and split nicknames, trim whitespace
-	isonField := strings.TrimPrefix(parts[3], ":")
-	isonField = strings.TrimSpace(isonField)
+	isonField := strings.TrimSpace(strings.TrimPrefix(parts[3], ":"))
 	var currentnicknames []string
 	if isonField != "" {
 		for _, n := range strings.Fields(isonField) {
-			currentnicknames = append(currentnicknames, strings.ToLower(strings.TrimSpace(n)))
+			currentnicknames = append(currentnicknames, strings.ToLower(n))
 		}
 	}
 
@@ -123,11 +123,11 @@ func (b *NotifyBot) handleISONResponse(parts []string) {
 		lowerNick := strings.ToLower(nickname)
 		isOnline := slices.Contains(currentnicknames, lowerNick)
 		if isOnline && !b.nicknames[nickname] {
-			b.log.Info("The following friend is now online:", "nickname", strings.TrimSuffix(nickname, "\n"))
+			b.log.Info("The following friend is now online:", "nickname", nickname)
 			b.nicknames[nickname] = true
 			b.notify(fmt.Sprintf("%s is online", nickname))
 		} else if !isOnline && b.nicknames[nickname] {
-			b.log.Info("The following friend is now offline:", "nickname", strings.TrimSuffix(nickname, "\n"))
+			b.log.Info("The following friend is now offline:", "nickname", nickname)
 			b.nicknames[nickname] = false
 			b.notify(fmt.Sprintf("%s is offline", nickname))
 		}
