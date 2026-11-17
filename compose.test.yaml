@@ -1,0 +1,6 @@
+name: notifybot-test
+services:
+  ircu:
+    build: ./test/ircu
+    ports:
+      - "127.0.0.1:16667:6667"

@@ -1,0 +1,12 @@
+.git
+.agents
+.codex
+.aws
+*.sh
+*.tar
+config.yaml
+task-definition.json
+.env
+.env.*
+coverage*
+REVIEW.md

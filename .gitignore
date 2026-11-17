@@ -3,3 +3,12 @@ task-definition.json
 local-test.sh
 notify.sh
 publish.sh
+.env
+.env.*
+notifybot
+*.tar
+coverage.out
+*.log
+*.test
+*.out
+coverage/
